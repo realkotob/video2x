@@ -244,7 +244,7 @@ class Upscaler:
 
                 # if the driver being used is waifu2x_ncnn_vulkan
                 elif self.waifu2x_driver == 'waifu2x_ncnn_vulkan':
-                    w2 = Waifu2xNcnnVulkan(copy.deepcopy(self.waifu2x_settings))
+                    w2 = Waifu2xNcnnVulkan(copy.deepcopy(self.waifu2x_settings), self.model_dir)
                     thread = threading.Thread(target=w2.upscale,
                                               args=(thread_info[0],
                                                     self.upscaled_frames,

@@ -46,6 +46,7 @@ smooth and edges sharp.
 from exceptions import *
 from upscaler import AVAILABLE_DRIVERS
 from upscaler import Upscaler
+import common
 
 # built-in imports
 import argparse
@@ -58,6 +59,7 @@ import sys
 import tempfile
 import time
 import traceback
+from pathlib import Path
 
 # third-party imports
 from avalon_framework import Avalon
@@ -196,48 +198,6 @@ def read_config(config_file):
         return config
 
 
-def absolutify_paths(config):
-    """ Check to see if paths to binaries are absolute
-
-    This function checks if paths to binary files are absolute.
-    If not, then absolutify the path.
-
-    Arguments:
-        config {dict} -- configuration file dictionary
-
-    Returns:
-        dict -- configuration file dictionary
-    """
-    current_directory = pathlib.Path(sys.argv[0]).parent.absolute()
-
-    # check waifu2x-caffe path
-    if not re.match('^[a-z]:', config['waifu2x_caffe']['waifu2x_caffe_path'], re.IGNORECASE):
-        config['waifu2x_caffe']['waifu2x_caffe_path'] = current_directory / config['waifu2x_caffe']['waifu2x_caffe_path']
-
-    # check waifu2x-converter-cpp path
-    if not re.match('^[a-z]:', config['waifu2x_converter']['waifu2x_converter_path'], re.IGNORECASE):
-        config['waifu2x_converter']['waifu2x_converter_path'] = current_directory / config['waifu2x_converter']['waifu2x_converter_path']
-
-    # check waifu2x_ncnn_vulkan path
-    if not re.match('^[a-z]:', config['waifu2x_ncnn_vulkan']['waifu2x_ncnn_vulkan_path'], re.IGNORECASE):
-        config['waifu2x_ncnn_vulkan']['waifu2x_ncnn_vulkan_path'] = current_directory / config['waifu2x_ncnn_vulkan']['waifu2x_ncnn_vulkan_path']
-
-    # check anime4k path
-    if not re.match('^[a-z]:', config['anime4k']['anime4k_path'], re.IGNORECASE):
-        config['anime4k']['anime4k_path'] = current_directory / config['anime4k']['anime4k_path']
-
-    # check ffmpeg path
-    if not re.match('^[a-z]:', config['ffmpeg']['ffmpeg_path'], re.IGNORECASE):
-        config['ffmpeg']['ffmpeg_path'] = current_directory / config['ffmpeg']['ffmpeg_path']
-
-    # check video2x cache path
-    if config['video2x']['video2x_cache_directory']:
-        if not re.match('^[a-z]:', config['video2x']['video2x_cache_directory'], re.IGNORECASE):
-            config['video2x']['video2x_cache_directory'] = current_directory / config['video2x']['video2x_cache_directory']
-
-    return config
-
-
 # /////////////////// Execution /////////////////// #
 
 # this is not a library
@@ -283,10 +243,10 @@ if args.driver in ['waifu2x_caffe', 'waifu2x_converter', 'waifu2x_ncnn_vulkan']:
 # anime4k runs significantly faster with more threads
 if args.driver == 'anime4k' and args.threads <= 1:
     Avalon.warning('Anime4K runs significantly faster with more threads')
-    if Avalon.ask('Use more threads of Anime4K?', True):
+    if Avalon.ask('Use more threads of Anime4K?', default=True, batch=args.batch):
         while True:
             try:
-                threads = Avalon.gets('Amount of threads to use [5]: ')
+                threads = Avalon.gets('Amount of threads to use [5]: ', default=5, batch=args.batch)
                 args.threads = int(threads)
                 break
             except ValueError:
@@ -298,36 +258,40 @@ if args.driver == 'anime4k' and args.threads <= 1:
 
 # read configurations from JSON
 config = read_config(args.config)
-config = absolutify_paths(config)
 
 # load waifu2x configuration
-if args.driver == 'waifu2x_caffe':
-    waifu2x_settings = config['waifu2x_caffe']
-    if not pathlib.Path(waifu2x_settings['waifu2x_caffe_path']).is_file():
-        Avalon.error('Specified waifu2x-caffe directory doesn\'t exist')
-        Avalon.error('Please check the configuration file settings')
-        raise FileNotFoundError(waifu2x_settings['waifu2x_caffe_path'])
-elif args.driver == 'waifu2x_converter':
-    waifu2x_settings = config['waifu2x_converter']
-    if not pathlib.Path(waifu2x_settings['waifu2x_converter_path']).is_dir():
-        Avalon.error('Specified waifu2x-converter-cpp directory doesn\'t exist')
-        Avalon.error('Please check the configuration file settings')
-        raise FileNotFoundError(waifu2x_settings['waifu2x_converter_path'])
-elif args.driver == 'waifu2x_ncnn_vulkan':
-    waifu2x_settings = config['waifu2x_ncnn_vulkan']
-    if not pathlib.Path(waifu2x_settings['waifu2x_ncnn_vulkan_path']).is_file():
-        Avalon.error('Specified waifu2x_ncnn_vulkan directory doesn\'t exist')
-        Avalon.error('Please check the configuration file settings')
-        raise FileNotFoundError(waifu2x_settings['waifu2x_ncnn_vulkan_path'])
-elif args.driver == 'anime4k':
-    waifu2x_settings = config['anime4k']
-    if not pathlib.Path(waifu2x_settings['anime4k_path']).is_file():
-        Avalon.error('Specified anime4k directory doesn\'t exist')
-        Avalon.error('Please check the configuration file settings')
-        raise FileNotFoundError(waifu2x_settings['anime4k_path'])
+waifu2x_settings = config[args.driver]
+
+# Search for valid java binary path
+if args.driver == 'anime4k':
+    path = common.find_path(waifu2x_settings['java_path'], 'java')
+    if path[0] is None and path[1] is None:
+        raise FileNotFoundError(Path(waifu2x_settings['java_path']).absolute() / 'java')
+
+    waifu2x_settings['java_path'] = path[0]
+    waifu2x_settings['java_binary'] = path[1]
+
+
+# Search for valid waifu2x binary path
+if 'win_binary' in waifu2x_settings and sys.platform == 'win32':
+    waifu2x_settings['binary'] = waifu2x_settings['win_binary']
+
+path = common.find_path(waifu2x_settings['path'], waifu2x_settings['binary'])
+if path[0] is None and path[1] is None:
+    raise FileNotFoundError(Path(waifu2x_settings['path']).absolute() / waifu2x_settings['binary'])
+
+waifu2x_settings['path'] = path[0]
+waifu2x_settings['binary'] = path[1]
 
 # read FFmpeg configuration
 ffmpeg_settings = config['ffmpeg']
+
+# Search for valid ffmpeg path
+ffmpeg_path = common.find_path(ffmpeg_settings['path'], 'ffmpeg')
+ffprobe_path = common.find_path(ffmpeg_settings['path'], 'ffprobe')
+ffmpeg_settings['path'] = ffmpeg_path[0]
+ffmpeg_settings['ffmpeg_binary'] = ffmpeg_path[1]
+ffmpeg_settings['ffprobe_binary'] = ffprobe_path[1]
 
 # load video2x settings
 image_format = config['video2x']['image_format'].lower()

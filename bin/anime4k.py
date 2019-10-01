@@ -10,6 +10,9 @@ Description: This class is a high-level wrapper
 for Anime4k.
 """
 
+# local imports
+import common
+
 # built-in imports
 import subprocess
 import threading
@@ -27,8 +30,8 @@ class Anime4k:
     the upscale function.
     """
 
-    def __init__(self, waifu2x_settings):
-        self.waifu2x_settings = waifu2x_settings
+    def __init__(self, settings):
+        self.settings = settings
         self.print_lock = threading.Lock()
 
     def upscale(self, input_directory, output_directory, scale_ratio, upscaler_exceptions, push_strength=None, push_grad_strength=None):
@@ -53,16 +56,19 @@ class Anime4k:
             # get a list lof all image files in input_directory
             extracted_frame_files = [f for f in input_directory.iterdir() if str(f).lower().endswith('.png') or str(f).lower().endswith('.jpg')]
 
+            # Only print debug_info on first iteration.
+            logged = False
+
             # upscale each image in input_directory
             for image in extracted_frame_files:
 
                 execute = [
-                    self.waifu2x_settings['java_path'],
+                    self.settings['java_path'] / self.settings['java_binary'],
                     '-jar',
-                    self.waifu2x_settings['anime4k_path'],
-                    str(image.absolute()),
-                    str(output_directory / image.name),
-                    str(scale_ratio)
+                    self.settings['path'] / self.settings['binary'],
+                    image.absolute(),
+                    output_directory / image.name,
+                    scale_ratio
                 ]
 
                 # optional arguments
@@ -76,9 +82,15 @@ class Anime4k:
                     if locals()[arg] is not None:
                         execute.extend([locals([arg])])
 
-                self.print_lock.acquire()
-                Avalon.debug_info(f'Executing: {execute}', )
-                self.print_lock.release()
+                # turn all list elements into string to avoid errors
+                execute = [str(e) for e in execute]
+
+                if not logged:
+                    self.print_lock.acquire()
+                    Avalon.debug_info(f'Executing: {execute}')
+                    self.print_lock.release()
+                    logged = True
+
                 return_value += subprocess.run(execute, check=True).returncode
 
             # print thread exiting message

@@ -10,6 +10,9 @@ Description: This class is a high-level wrapper
 for waifu2x-caffe.
 """
 
+# local imports
+import common
+
 # built-in imports
 import subprocess
 import threading
@@ -27,16 +30,27 @@ class Waifu2xCaffe:
     the upscale function.
     """
 
-    def __init__(self, waifu2x_settings, process, model_dir, bit_depth):
-        self.waifu2x_settings = waifu2x_settings
-        self.waifu2x_settings['process'] = process
-        self.waifu2x_settings['model_dir'] = model_dir
-        self.waifu2x_settings['output_depth'] = bit_depth
+    def __init__(self, settings, process, model_dir, bit_depth):
+        self.settings = settings
+        self.settings['process'] = process
+        self.settings['output_depth'] = bit_depth
 
         # arguments passed through command line overwrites config file values
         self.process = process
-        self.model_dir = model_dir
         self.print_lock = threading.Lock()
+
+        if model_dir:
+            self.settings['model_dir'] = model_dir
+
+        # Searches for models directory
+        if 'model_dir' in self.settings:
+            model_dir = common.find_path(self.settings['model_dir'])
+
+            # Search for model folder in waifu2x-caffe folder
+            if model_dir[0] is None:
+                model_dir = common.find_path(self.settings['path'] / self.settings['model_dir'])
+
+            self.settings['model_dir'] = model_dir[0]
 
     def upscale(self, input_directory, output_directory, scale_ratio, scale_width, scale_height, image_format, upscaler_exceptions):
         """This is the core function for WAIFU2X class
@@ -50,16 +64,16 @@ class Waifu2xCaffe:
 
         try:
             # overwrite config file settings
-            self.waifu2x_settings['input_path'] = input_directory
-            self.waifu2x_settings['output_path'] = output_directory
+            self.settings['input_path'] = input_directory
+            self.settings['output_path'] = output_directory
 
             if scale_ratio:
-                self.waifu2x_settings['scale_ratio'] = scale_ratio
+                self.settings['scale_ratio'] = scale_ratio
             elif scale_width and scale_height:
-                self.waifu2x_settings['scale_width'] = scale_width
-                self.waifu2x_settings['scale_height'] = scale_height
+                self.settings['scale_width'] = scale_width
+                self.settings['scale_height'] = scale_height
 
-            self.waifu2x_settings['output_extention'] = image_format
+            self.settings['output_extention'] = image_format
 
             # print thread start message
             self.print_lock.acquire()
@@ -68,21 +82,20 @@ class Waifu2xCaffe:
 
             # list to be executed
             # initialize the list with waifu2x binary path as the first element
-            execute = [str(self.waifu2x_settings['waifu2x_caffe_path'])]
+            execute = [self.settings['path'] / self.settings['binary']]
 
-            for key in self.waifu2x_settings.keys():
-
-                value = self.waifu2x_settings[key]
-
-                # is executable key or null or None means that leave this option out (keep default)
-                if key == 'waifu2x_caffe_path' or value is None or value is False:
+            for key, value in self.settings.items():
+                if key in ['path', 'binary', 'win_binary']:
                     continue
+                # is executable key or null or None means that leave this option out (keep default)
+                if value is None or value is False:
+                    continue
+
+                if len(key) == 1:
+                    execute.append(f'-{key}')
                 else:
-                    if len(key) == 1:
-                        execute.append(f'-{key}')
-                    else:
-                        execute.append(f'--{key}')
-                    execute.append(str(value))
+                    execute.append(f'--{key}')
+                execute.append(str(value))
 
             Avalon.debug_info(f'Executing: {execute}')
             completed_command = subprocess.run(execute, check=True)
